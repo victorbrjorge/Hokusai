@@ -1,6 +1,6 @@
 #include <iostream>
 #include <atomic>
-#include <list>
+#include <deque>
 
 using namespace std;
 
@@ -15,7 +15,7 @@ typedef struct CMSketch
 typedef struct Hokusai
 {
     int numOfSketches;
-    CMSketch *CMS[100];
+    deque <CMSketch*> CMS;
 } Hokusai;
 
 typedef struct
@@ -41,7 +41,7 @@ typedef struct
     int index,pos;
 } sumItem_t;
 
-int newFilter(int profundidade, int largura);
+int newFilter(int profundidade, int largura,int insert_pos);
 void deleteFilter(int index);
 void copyFilter(int index1,int index2);
 void printFilter(int index);

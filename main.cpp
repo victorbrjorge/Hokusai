@@ -5,7 +5,7 @@
 
 #define WIDTH 524288 //POTENCIA DE 2  //tam do filtro 32/524288
 #define DEPTH 32 //POTENCIA DE 2
-#define NOMEARQUIVO "entrada_real.txt"
+#define NOMEARQUIVO "entrada_teste.txt"
 
 #define BUFFER_SIZE 1
 #define NUMTHREADS 4

@@ -10,25 +10,26 @@
 Hokusai sketches;
 int **hash_parameter;
 
-int newFilter(int profundidade, int largura)
+int newFilter(int profundidade, int largura,int insert_pos)
 {
     int index = sketches.numOfSketches;
+    CMSketch *new_sketch; 
 
-    sketches.CMS[index] = new CMSketch;
-    sketches.numOfSketches++;
-    sketches.CMS[index]->width = largura;
-    sketches.CMS[index]->depth = profundidade/NUMTHREADS;
+    new_sketch = new CMSketch;
+    
+    new_sketch->width = largura;
+    new_sketch->depth = profundidade/NUMTHREADS;
 
-    sketches.CMS[index]->filter = new atomic_int**[NUMTHREADS];
+    new_sketch->filter = new atomic_int**[NUMTHREADS];
     for(int i=0; i<NUMTHREADS; i++)
     {
-        sketches.CMS[index]->filter[i] = new atomic_int*[profundidade];
+        new_sketch->filter[i] = new atomic_int*[profundidade];
     }
     for(int i=0; i<NUMTHREADS; i++)
     {
         for(int j=0; j<profundidade; j++)
         {
-            sketches.CMS[index]->filter[i][j] = new atomic_int[largura];
+            new_sketch->filter[i][j] = new atomic_int[largura];
         }
     }
 
@@ -38,31 +39,32 @@ int newFilter(int profundidade, int largura)
         {
             for(int k=0; k<largura; k++)
             {
-                sketches.CMS[index]->filter[i][j][k]=0;
+                new_sketch->filter[i][j][k]=0;
             }
         }
     }
-
+    sketches.CMS.insert(sketches.CMS.begin()+insert_pos,new_sketch);
+    sketches.numOfSketches++;
     return index;
 }
 
 void deleteFilter(int index)
 {
-    for (int i = 0; i < sketches.CMS[index]->depth; i++)
+    CMSketch *deletion_filter;
+    
+    deletion_filter = sketches.CMS.at(index);
+    
+    for (int i = 0; i < deletion_filter->depth; i++)
     {
-        for (int j = 0; j < sketches.CMS[index]->width; j++)
+        for (int j = 0; j < deletion_filter->width; j++)
         {
-            delete[] sketches.CMS[index]->filter[i][j];
+            delete[] deletion_filter->filter[i][j];
         }
-        delete[] sketches.CMS[index]->filter[i];
+        delete[] deletion_filter->filter[i];
     }
-    delete[] sketches.CMS[index]->filter;
-    delete sketches.CMS[index];
+    delete[] deletion_filter->filter;
+    sketches.CMS.erase(sketches.CMS.begin()+index);
 
-    for(int i=index; i<sketches.numOfSketches-1; i++)
-    {
-        sketches.CMS[i]=sketches.CMS[i+1];
-    }
     sketches.numOfSketches--;
 }
 
@@ -92,7 +94,7 @@ void copyFilter(int index1, int index2)
         {
             for (int k=0; k<sketches.CMS[index1]->width; k++)
             {
-                sketches.CMS[index1]->filter[i][j][k] = sketches.CMS[index2]->filter[i][j][k];
+                sketches.CMS[index1]->filter[i][j][k](sketches.CMS[index2]->filter[i][j][k]);
             }
         }
     }
@@ -116,7 +118,7 @@ void inicializa(int profundidade, int largura)
     } //SELECIONA O A E B DE CADA LINHA PARA A FUNÇÃO HASH
 
     sketches.numOfSketches=0;
-    newFilter(profundidade,largura);
+    newFilter(profundidade,largura,0);
 }
 
 void update(string palavra, int index)
@@ -321,10 +323,8 @@ void itemAgregation(int index)
         pthread_join(threads[i],NULL);
     }
 
-    new_filter_id=newFilter(sketches.CMS[index]->depth,sketches.CMS[index]->width/2);
+    new_filter_id=newFilter(sketches.CMS[index]->depth,sketches.CMS[index]->width/2,index);
     copyFilter(new_filter_id,index);
     deleteFilter(index);
-    sketches.CMS[index]=sketches.CMS[new_filter_id]; // endereço do novo filtro no lugar do antigo
-    deleteFilter(new_filter_id); //deletando a duplicação do filtro
 }
 
