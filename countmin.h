@@ -1,45 +1,59 @@
 #include <iostream>
 #include <atomic>
 #include <deque>
+#include <list>
+#include <fstream>
 
 using namespace std;
 
-typedef struct CMSketch
+struct CMSketch
 {
     int depth;
     int width;
     int time_length;
     atomic_int ***filter;
-} CMSketch;
+};
 
-typedef struct Hokusai
+struct Hokusai
 {
     int numOfSketches;
     deque <CMSketch*> CMS;
-} Hokusai;
+};
 
-typedef struct
+struct Buffertype
 {
     string palavra;
+    unsigned short cnt;
+};
+
+struct hashParallel_t
+{
+    list<Buffertype> *buffer;
     int pos;
     int index;
-} hashParallel_t;
+};
 
-typedef struct
+struct update_t
 {
-    string palavra;
+    list<Buffertype> *buffer; 
     int index;
-} update_t;
+};
 
-typedef struct
+struct sumTime_t
 {
     int index1,index2,pos;
-} sumTime_t;
+};
 
-typedef struct
+struct sumItem_t
 {
     int index,pos;
-} sumItem_t;
+};
+
+struct feedBuffer_t
+{
+    ifstream *file;
+    list <Buffertype> *buffer;
+};
 
 int newFilter(int profundidade, int largura,int insert_pos);
 void deleteFilter(int index);
@@ -48,7 +62,7 @@ void printFilter(int index);
 
 void inicializa(int altura, int profundidade);
 
-void update(string palavra,int index);
+void *update(void *threadupdate);
 int estimate(string palavra,int index);
 
 int hashSerial(string palavra, int a, int b,int index); //serial
@@ -61,4 +75,7 @@ void *sumTime(void *threadsum);
 
 void itemAgregation(int index);
 void *sumItem(void *threadsum);
+
+void *feedBuffer(void *threadbuffer);
+void startBuffer(ifstream *file, list<Buffertype> *buffer, int buffer_size);
 

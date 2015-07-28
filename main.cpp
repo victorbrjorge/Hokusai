@@ -3,12 +3,14 @@
 #include <pthread.h>
 #include "countmin.h"
 
-#define WIDTH 524288 //POTENCIA DE 2  //tam do filtro 32/524288
+#define WIDTH 524288 //POTENCIA DE 2  //tam do filtro ideal para a base de 500Mb 32/524288 (experimental)
 #define DEPTH 32 //POTENCIA DE 2
-#define NOMEARQUIVO "entrada_teste.txt"
+#define NOMEARQUIVO "entrada_real.txt"
 
-#define BUFFER_SIZE 1
-#define NUMTHREADS 4
+#define BUFFER_SIZE 1000000
+#define NUMTHREADS 2 /*NUM DE THREADS NA MAIN SERÁ SEMRE 2. UMA PRODUTORA (INSERE NO BUFFER)
+                       E OUTRA CONSUMIDORA (INSERE NOS SKETCHES E RETIRA DO BUFFER). A THREAD CONSUMIDORA
+                       CRIARÁ OUTRAS THREADS PARA PARALELIZAR O TRABALHO DELA.*/
 
 using namespace std;
 
@@ -16,34 +18,43 @@ int main(int argc, char *argv[])
 {
     string palavra;
     int resultado;
-
+    list <Buffertype> buffer;
+    
     ifstream arquivo(NOMEARQUIVO);
-
-    if(!arquivo)
+    if(!arquivo.is_open())
     {
         cout << "ERRO NO ARQUIVO!";
         return 0;
     }
-
+    
     cout << "Inicializando..." << endl;
     inicializa(DEPTH,WIDTH);
-
+    startBuffer(&arquivo,&buffer,BUFFER_SIZE);
+    //FIM DA PARTE SERIAL
     cout << "Memoria alocada, fazendo hashes..." << endl;
+    //PARTE PARALELA E CONTROLE TEMPORAL
+    pthread_t threads[NUMTHREADS];
+    pthread_attr_t attr;
 
-    int cnt=0;
-    while(!arquivo.eof())
-    {
-        arquivo >> palavra;
+    update_t updateargs;
+    feedBuffer_t feedBufferargs;
+    
+    updateargs.buffer=&buffer;
+    updateargs.index=0;
+    
+    feedBufferargs.buffer=&buffer;
+    feedBufferargs.file=&arquivo;
 
-        update(palavra,0);
-        cnt++;
-        if(cnt%100000==0)
-        {
-            cout << cnt << " palavras lidas" << endl;
-        }
-    }
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
+    
+    pthread_create(&threads[0],&attr,update,(void *) &updateargs);
+    pthread_create(&threads[1],&attr,feedBuffer,(void *) &feedBufferargs);
+    
+    pthread_join(threads[0],NULL);
+    pthread_join(threads[1],NULL);
 
-    //imprime(0);
+    //printFilter(0);
 
     cout << "Informe uma letra pra continuar: ";
 

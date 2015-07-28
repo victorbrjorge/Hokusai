@@ -1,0 +1,26 @@
+g++ -c -std=c++11 -pthread -O3 -Wall -pg main.cpp
+g++ -c -std=c++11 -pthread -O3 -Wall -pg countmin.cpp
+countmin.cpp: In function ‘void* hashParallel(void*)’:
+countmin.cpp:202:42: warning: comparison between signed and unsigned integer expressions [-Wsign-compare]
+         for (int i=0; i < palavra.length(); i++)
+                                          ^
+countmin.cpp:219:1: warning: no return statement in function returning non-void [-Wreturn-type]
+ }
+ ^
+countmin.cpp: In function ‘int hashSerial(std::string, int, int, int)’:
+countmin.cpp:229:38: warning: comparison between signed and unsigned integer expressions [-Wsign-compare]
+     for (int i=0; i < palavra.length(); i++)
+                                      ^
+countmin.cpp: In function ‘void* sumTime(void*)’:
+countmin.cpp:258:1: warning: no return statement in function returning non-void [-Wreturn-type]
+ }
+ ^
+countmin.cpp: In function ‘void* sumItem(void*)’:
+countmin.cpp:305:1: warning: no return statement in function returning non-void [-Wreturn-type]
+ }
+ ^
+countmin.cpp: In function ‘void* feedBuffer(void*)’:
+countmin.cpp:368:1: warning: no return statement in function returning non-void [-Wreturn-type]
+ }
+ ^
+g++ -std=c++11 -pthread -O3 main.o countmin.o -o hokusai

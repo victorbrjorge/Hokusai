@@ -1,4 +1,3 @@
-#include <stdlib.h>
 #include <pthread.h>
 #include "countmin.h"
 #include <string.h>
@@ -94,7 +93,7 @@ void copyFilter(int index1, int index2)
         {
             for (int k=0; k<sketches.CMS[index1]->width; k++)
             {
-                sketches.CMS[index1]->filter[i][j][k](sketches.CMS[index2]->filter[i][j][k]);
+                sketches.CMS[index1]->filter[i][j][k].store(sketches.CMS[index2]->filter[i][j][k],memory_order_relaxed);
             }
         }
     }
@@ -121,9 +120,11 @@ void inicializa(int profundidade, int largura)
     newFilter(profundidade,largura,0);
 }
 
-void update(string palavra, int index)
-{
-
+void *update(void *threadupdate)
+{   
+    update_t *args;
+    args = (update_t *) threadupdate;
+    
     pthread_t threads[NUMTHREADS];
     pthread_attr_t attr;
 
@@ -134,10 +135,10 @@ void update(string palavra, int index)
 
 
     for(int j=0; j<NUMTHREADS; j++)
-    {
+    {   
         hashargs[j].pos=j;
-        hashargs[j].palavra=palavra;
-        hashargs[j].index=index;
+        hashargs[j].buffer=args->buffer;
+        hashargs[j].index=args->index;
 
         pthread_create(&threads[j],&attr,hashParallel,(void *) &hashargs[j]);
     }
@@ -146,13 +147,14 @@ void update(string palavra, int index)
     {
         pthread_join(threads[i],NULL);
     }
+    cout << "PALAVRAS INSERIDAS" << endl;
 }
 
 int estimate(string palavra,int index)
 {
-    int hash_keys[sketches.CMS[index]->depth];
+    int hash_keys[sketches.CMS[index]->depth*NUMTHREADS];
 
-    for(int j=0; j<sketches.CMS[index]->depth; j++)
+    for(int j=0; j<sketches.CMS[index]->depth*NUMTHREADS; j++)
     {
         hash_keys[j]=hashSerial(palavra,hash_parameter[j][0],hash_parameter[j][1],index);
     }
@@ -176,40 +178,52 @@ int estimate(string palavra,int index)
 
 void *hashParallel(void *threadhash)
 {
-
-    string palavra; //assinatura original da funcao
     int pos,index;
 
     int a,b;
-
+    
     hashParallel_t *args;
     args = (hashParallel_t *) threadhash;
 
-    palavra = args->palavra;
     pos=args->pos;
     index=args->index;
-
-
+    
     char ch[1000];
-    strcpy(ch, palavra.c_str());
-
+    
     int saida,c;
 
-    unsigned long hash = 5381;
-    for (int i=0; i < palavra.length(); i++)
-    {
-        c = ch[i];
-        hash = ((hash << 5) + hash) + c; // hash * 33 + c
-    }
+    unsigned long hash;
+    
+    string palavra;
+    list<Buffertype>::iterator it=args->buffer->begin();
+    
+    while(it!=args->buffer->end()) {
+        
+        palavra=it->palavra;
+        
+        strcpy(ch, palavra.c_str());
+        
+        hash = 5381;
+        for (int i=0; i < palavra.length(); i++)
+        {
+            c = ch[i];
+            hash = ((hash << 5) + hash) + c; // hash * 33 + c
+        }
 
-    for(int i=0; i<sketches.CMS[index]->depth; i++)
-    {
+        for(int i=0; i<sketches.CMS[index]->depth; i++)
+        {
 
-        a=hash_parameter[sketches.CMS[index]->depth*pos+i][0];
-        b=hash_parameter[sketches.CMS[index]->depth*pos+i][1];
+            a=hash_parameter[sketches.CMS[index]->depth*pos+i][0];
+            b=hash_parameter[sketches.CMS[index]->depth*pos+i][1];
 
-        saida = ((a*hash + b) % 2147483647) % (sketches.CMS[index]->width-1);
-        sketches.CMS[index]->filter[pos][i][saida]++; //atualiza
+            saida = ((a*hash + b) % 2147483647) % (sketches.CMS[index]->width);
+            sketches.CMS[index]->filter[pos][i][saida]++; //atualiza
+        }
+        it->cnt++;
+        if(it->cnt == NUMTHREADS && it==args->buffer->begin()){ //ou seja, se todas as threads já leram essa pos do buffer
+            args->buffer->pop_front();
+        }
+        it++;
     }
 }
 
@@ -227,7 +241,7 @@ int hashSerial(string palavra, int a, int b,int index)
         hash = ((hash << 5) + hash) + c; // hash * 33 + c
     }
 
-    saida = ((a*hash + b) % 2147483647) % (sketches.CMS[index]->width-1);
+    saida = ((a*hash + b) % 2147483647) % (sketches.CMS[index]->width);
     return saida;
 
 }
@@ -328,3 +342,39 @@ void itemAgregation(int index)
     deleteFilter(index);
 }
 
+void startBuffer(ifstream *file, list<Buffertype> *buffer, int buffer_size){
+    Buffertype temp;
+    int cnt=0;
+    temp.cnt = 0;
+    while(cnt<buffer_size && !file->eof())
+    {
+        *file >> temp.palavra;
+        buffer->push_back(temp);
+        cnt++;
+    }
+    cout << "BUFFER CRIADO" << endl;
+}
+
+void *feedBuffer(void *threadbuffer){
+    
+    ifstream *file;
+    list <Buffertype> *buffer;
+    Buffertype temp;
+
+    feedBuffer_t *args;
+    args = (feedBuffer_t *) threadbuffer;
+
+    buffer = args->buffer;
+    file = args->file;
+    
+    temp.cnt = 0;
+    
+    while(!file->eof())
+    {
+        *file >> temp.palavra;
+        buffer->push_back(temp);
+    }
+    file->close();
+    cout << "FIM DA LEITURA" << endl;
+    pthread_exit(NULL);
+}
