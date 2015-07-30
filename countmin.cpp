@@ -4,10 +4,13 @@
 #include <time.h>
 #include <climits>
 
-#define NUMTHREADS 4 //POTENCIA DE 2
+#define NUMTHREADS 2 //POTENCIA DE 2
 
 Hokusai sketches;
 int **hash_parameter;
+pthread_mutex_t lock_cnt;
+pthread_mutex_t lock_size = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
 
 int newFilter(int profundidade, int largura,int insert_pos)
 {
@@ -132,13 +135,15 @@ void *update(void *threadupdate)
 
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-
-
+    
+    pthread_mutex_init(&lock_cnt, NULL);
+    
     for(int j=0; j<NUMTHREADS; j++)
     {   
         hashargs[j].pos=j;
         hashargs[j].buffer=args->buffer;
         hashargs[j].index=args->index;
+        hashargs[j].buffer_current_size=args->buffer_current_size;
 
         pthread_create(&threads[j],&attr,hashParallel,(void *) &hashargs[j]);
     }
@@ -147,6 +152,7 @@ void *update(void *threadupdate)
     {
         pthread_join(threads[i],NULL);
     }
+    pthread_mutex_destroy(&lock_cnt);
     cout << "PALAVRAS INSERIDAS" << endl;
 }
 
@@ -181,12 +187,14 @@ void *hashParallel(void *threadhash)
     int pos,index;
 
     int a,b;
+    unsigned int *buffer_current_size;
     
     hashParallel_t *args;
     args = (hashParallel_t *) threadhash;
 
     pos=args->pos;
     index=args->index;
+    buffer_current_size=args->buffer_current_size;
     
     char ch[1000];
     
@@ -196,6 +204,7 @@ void *hashParallel(void *threadhash)
     
     string palavra;
     list<Buffertype>::iterator it=args->buffer->begin();
+    
     
     while(it!=args->buffer->end()) {
         
@@ -219,12 +228,27 @@ void *hashParallel(void *threadhash)
             saida = ((a*hash + b) % 2147483647) % (sketches.CMS[index]->width);
             sketches.CMS[index]->filter[pos][i][saida]++; //atualiza
         }
-        it->cnt++;
+        pthread_mutex_lock(&lock_cnt);
+            (it->cnt)++;
+            //cout << it->cnt << endl;
+        pthread_mutex_unlock(&lock_cnt);
+        
         if(it->cnt == NUMTHREADS && it==args->buffer->begin()){ //ou seja, se todas as threads já leram essa pos do buffer
-            args->buffer->pop_front();
+                args->buffer->pop_front();
+                (*buffer_current_size)--;
+            cout << "Tirei palavra: " << palavra << endl;
+            cout << "Tam buffer: " << *buffer_current_size << endl;
+            it=args->buffer->begin();
+        }else{
+            it++;
         }
-        it++;
+        /*pthread_mutex_lock(&lock_size);
+            while (*buffer_current_size==0) {
+                pthread_cond_wait(&cond, &lock_size);
+            }       
+        pthread_mutex_unlock(&lock_size);*/
     }
+    pthread_exit(NULL);
 }
 
 int hashSerial(string palavra, int a, int b,int index)
@@ -243,7 +267,6 @@ int hashSerial(string palavra, int a, int b,int index)
 
     saida = ((a*hash + b) % 2147483647) % (sketches.CMS[index]->width);
     return saida;
-
 }
 
 void *sumTime(void *threadsum)
@@ -360,19 +383,33 @@ void *feedBuffer(void *threadbuffer){
     ifstream *file;
     list <Buffertype> *buffer;
     Buffertype temp;
+    unsigned int *buffer_current_size;
+    long unsigned int buffer_size;
 
     feedBuffer_t *args;
     args = (feedBuffer_t *) threadbuffer;
 
     buffer = args->buffer;
     file = args->file;
+    buffer_current_size=args->buffer_current_size;
+    buffer_size=args->buffer_size;
     
     temp.cnt = 0;
     
     while(!file->eof())
-    {
+    {   
+        /*pthread_mutex_lock(&lock_size);
+        
         *file >> temp.palavra;
         buffer->push_back(temp);
+        (*buffer_current_size)++;
+         
+        if (*buffer_current_size == buffer_size) {
+            pthread_mutex_unlock(&lock_size);
+            pthread_cond_broadcast(&cond);
+        } else {
+            pthread_mutex_unlock(&lock_size);
+        }*/
     }
     file->close();
     cout << "FIM DA LEITURA" << endl;

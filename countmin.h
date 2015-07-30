@@ -23,7 +23,7 @@ struct Hokusai
 struct Buffertype
 {
     string palavra;
-    unsigned short cnt;
+    unsigned short cnt; //TEM DE SER ATÔMICO, POREM HÁ ERRO
 };
 
 struct hashParallel_t
@@ -31,12 +31,14 @@ struct hashParallel_t
     list<Buffertype> *buffer;
     int pos;
     int index;
+    unsigned int *buffer_current_size;
 };
 
 struct update_t
 {
     list<Buffertype> *buffer; 
     int index;
+    unsigned int *buffer_current_size;
 };
 
 struct sumTime_t
@@ -53,6 +55,8 @@ struct feedBuffer_t
 {
     ifstream *file;
     list <Buffertype> *buffer;
+    unsigned int *buffer_current_size;
+    long unsigned int buffer_size;
 };
 
 int newFilter(int profundidade, int largura,int insert_pos);
