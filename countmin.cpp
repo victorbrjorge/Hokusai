@@ -4,13 +4,19 @@
 #include <time.h>
 #include <climits>
 
-#define NUMTHREADS 2 //POTENCIA DE 2
+#define NUMTHREADS 4 //POTENCIA DE 2
 
 Hokusai sketches;
 int **hash_parameter;
-pthread_mutex_t lock_cnt;
-pthread_mutex_t lock_size = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t lock_cnt = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t lock_buffer = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+pthread_cond_t can_produce = PTHREAD_COND_INITIALIZER;
+pthread_cond_t can_consume = PTHREAD_COND_INITIALIZER;
+
+pthread_barrier_t barrier;
+
 
 int newFilter(int profundidade, int largura,int insert_pos)
 {
@@ -136,7 +142,7 @@ void *update(void *threadupdate)
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
     
-    pthread_mutex_init(&lock_cnt, NULL);
+    pthread_barrier_init(&barrier,NULL,NUMTHREADS);
     
     for(int j=0; j<NUMTHREADS; j++)
     {   
@@ -152,7 +158,6 @@ void *update(void *threadupdate)
     {
         pthread_join(threads[i],NULL);
     }
-    pthread_mutex_destroy(&lock_cnt);
     cout << "PALAVRAS INSERIDAS" << endl;
 }
 
@@ -228,25 +233,34 @@ void *hashParallel(void *threadhash)
             saida = ((a*hash + b) % 2147483647) % (sketches.CMS[index]->width);
             sketches.CMS[index]->filter[pos][i][saida]++; //atualiza
         }
-        pthread_mutex_lock(&lock_cnt);
+        
+        pthread_mutex_lock(&lock_cnt); //lock somente para garatir integridade do valor
             (it->cnt)++;
-            //cout << it->cnt << endl;
         pthread_mutex_unlock(&lock_cnt);
         
+        //sessão crítica
         if(it->cnt == NUMTHREADS && it==args->buffer->begin()){ //ou seja, se todas as threads já leram essa pos do buffer
+            pthread_mutex_lock(&lock_buffer);
+                it++;
                 args->buffer->pop_front();
                 (*buffer_current_size)--;
-            cout << "Tirei palavra: " << palavra << endl;
-            cout << "Tam buffer: " << *buffer_current_size << endl;
-            it=args->buffer->begin();
+            pthread_mutex_unlock(&lock_buffer);
+            
+            //cout << "Tirei palavra: " << palavra << endl;
+            //cout << "Tam buffer: " << *buffer_current_size << endl;
+            
+            pthread_cond_signal(&can_produce);
         }else{
             it++;
         }
-        /*pthread_mutex_lock(&lock_size);
-            while (*buffer_current_size==0) {
-                pthread_cond_wait(&cond, &lock_size);
-            }       
-        pthread_mutex_unlock(&lock_size);*/
+        
+        pthread_barrier_wait(&barrier); //BARREIRA PARA UM THREAD NÃO ATINGIR O FIM DO BUFFER (limitado pela thread mais lenta)
+        
+        pthread_mutex_trylock(&mutex);
+        while (*buffer_current_size==0) { //se o buffer estiver vazio, espere PS.: fora da sessão crítica pois temos vários workers
+            pthread_cond_wait(&can_consume, &mutex);
+        }      
+        pthread_mutex_unlock(&mutex);
     }
     pthread_exit(NULL);
 }
@@ -398,20 +412,24 @@ void *feedBuffer(void *threadbuffer){
     
     while(!file->eof())
     {   
-        /*pthread_mutex_lock(&lock_size);
+        pthread_mutex_lock(&mutex);
         
-        *file >> temp.palavra;
-        buffer->push_back(temp);
-        (*buffer_current_size)++;
-         
-        if (*buffer_current_size == buffer_size) {
-            pthread_mutex_unlock(&lock_size);
-            pthread_cond_broadcast(&cond);
-        } else {
-            pthread_mutex_unlock(&lock_size);
-        }*/
+        while(*buffer_current_size == buffer_size) { // full
+            // wait until some elements are consumed
+            pthread_cond_wait(&can_produce, &mutex);
+        }
+        
+        pthread_mutex_lock(&lock_buffer);
+            *file >> temp.palavra;
+            buffer->push_back(temp);
+            (*buffer_current_size)++;
+        pthread_mutex_unlock(&lock_buffer);
+        
+        pthread_cond_broadcast(&can_consume);
+        pthread_mutex_unlock(&mutex);
     }
     file->close();
+    *buffer_current_size = -1; //SINALIZAR QUE A LEITURA ACABOU, EIVTANDO O LOCK
     cout << "FIM DA LEITURA" << endl;
     pthread_exit(NULL);
 }

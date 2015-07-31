@@ -3,11 +3,11 @@
 #include <pthread.h>
 #include "countmin.h"
 
-#define WIDTH 512 //POTENCIA DE 2  //tam do filtro ideal para a base de 500Mb 32/524288 (experimental)
-#define DEPTH 16 //POTENCIA DE 2
-#define NOMEARQUIVO "entrada_teste.txt"
+#define WIDTH 524288 //POTENCIA DE 2  //tam do filtro ideal para a base de 500Mb 32/524288 (experimental)
+#define DEPTH 32 //POTENCIA DE 2
+#define NOMEARQUIVO "entrada_real.txt"
 
-#define BUFFER_SIZE 100
+#define BUFFER_SIZE 1000000
 #define NUMTHREADS 2 /*NUM DE THREADS NA MAIN SERÁ SEMRE 2. UMA PRODUTORA (INSERE NO BUFFER)
                        E OUTRA CONSUMIDORA (INSERE NOS SKETCHES E RETIRA DO BUFFER). A THREAD CONSUMIDORA
                        CRIARÁ OUTRAS THREADS PARA PARALELIZAR O TRABALHO DELA.*/
@@ -57,17 +57,15 @@ int main(int argc, char *argv[])
 
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
-    //pthread_mutex_init(&lock_read, NULL);
     
     pthread_create(&threads[0],&attr,feedBuffer,(void *) &feedBufferargs);
     pthread_create(&threads[1],&attr,update,(void *) &updateargs);
     
     
+    pthread_join(threads[1],NULL); //UPDATE DEPENDE DE COND_WAIT, PORTANTO TEM DE ACABAR PRIMEIRO
     pthread_join(threads[0],NULL);
-    pthread_join(threads[1],NULL);
     
     buffer.clear();
-    //pthread_mutex_destroy(&lock_read);
     //printFilter(0);
     
     
