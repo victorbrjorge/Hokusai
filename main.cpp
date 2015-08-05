@@ -3,11 +3,11 @@
 #include <pthread.h>
 #include "countmin.h"
 
-#define WIDTH 524288 //POTENCIA DE 2  //tam do filtro ideal para a base de 500Mb 32/524288 (experimental)
-#define DEPTH 32 //POTENCIA DE 2
-#define NOMEARQUIVO "entrada_real.txt"
+#define WIDTH 512 //POTENCIA DE 2  //tam do filtro ideal para a base de 500Mb 32/524288 (experimental)
+#define DEPTH 8 //POTENCIA DE 2
+#define NOMEARQUIVO "entrada_teste.txt"
 
-#define BUFFER_SIZE 1000000
+#define BUFFER_SIZE 100 //(experimental) 1% da base
 #define NUMTHREADS 2 /*NUM DE THREADS NA MAIN SERÁ SEMRE 2. UMA PRODUTORA (INSERE NO BUFFER)
                        E OUTRA CONSUMIDORA (INSERE NOS SKETCHES E RETIRA DO BUFFER). A THREAD CONSUMIDORA
                        CRIARÁ OUTRAS THREADS PARA PARALELIZAR O TRABALHO DELA.*/
@@ -21,8 +21,8 @@ int main(int argc, char *argv[])
     int resultado;
     list <Buffertype> buffer;
     
-    unsigned int buffer_current_size; //determina se o buffer deve ler ou não
-    buffer_current_size = BUFFER_SIZE;
+    atomic_int buffer_current_size; //variável de controle do tamanho atual do buffer
+    buffer_current_size.store(BUFFER_SIZE);
     
     ifstream arquivo(NOMEARQUIVO);
     if(!arquivo.is_open())
@@ -33,6 +33,7 @@ int main(int argc, char *argv[])
     
     cout << "Inicializando..." << endl;
     inicializa(DEPTH,WIDTH);
+    
     buffer.clear();
     startBuffer(&arquivo,&buffer,BUFFER_SIZE);
     
@@ -58,8 +59,8 @@ int main(int argc, char *argv[])
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
     
-    pthread_create(&threads[0],&attr,feedBuffer,(void *) &feedBufferargs);
-    pthread_create(&threads[1],&attr,update,(void *) &updateargs);
+    pthread_create(&threads[0],&attr,feedBuffer,(void *) &feedBufferargs); //produtora
+    pthread_create(&threads[1],&attr,update,(void *) &updateargs); //consumidor
     
     
     pthread_join(threads[1],NULL); //UPDATE DEPENDE DE COND_WAIT, PORTANTO TEM DE ACABAR PRIMEIRO

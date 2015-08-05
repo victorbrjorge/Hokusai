@@ -4,19 +4,19 @@
 #include <time.h>
 #include <climits>
 
-#define NUMTHREADS 4 //POTENCIA DE 2
+#define NUMTHREADS 4 //NÚMERO DE WORKER THREADS (sempre múltiplo de 2)
 
 Hokusai sketches;
-int **hash_parameter;
-pthread_mutex_t lock_cnt = PTHREAD_MUTEX_INITIALIZER;
+int **hash_parameter; //Guarda os parametros A e B das hashes, de acordo com o paper do count-min sketch
+
+//DECLARAÇÃO E INICIALIZAÇÃO DOS LOCKS
+
+//pthread_mutex_t lock_cnt = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t lock_buffer = PTHREAD_MUTEX_INITIALIZER;
 pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 pthread_cond_t can_produce = PTHREAD_COND_INITIALIZER;
 pthread_cond_t can_consume = PTHREAD_COND_INITIALIZER;
-
-pthread_barrier_t barrier;
-
 
 int newFilter(int profundidade, int largura,int insert_pos)
 {
@@ -94,7 +94,7 @@ void printFilter(int index)
     cout << "IMPRESSAO FEITA" << endl;
 }
 
-void copyFilter(int index1, int index2)
+void copyFilter(int index1, int index2) //copia o filtro 2 para o filtro 1, ignora tamanho
 {
     for(int i=0; i<NUMTHREADS; i++)
     {
@@ -108,7 +108,7 @@ void copyFilter(int index1, int index2)
     }
 }
 
-void inicializa(int profundidade, int largura)
+void inicializa(int profundidade, int largura) //aloca memória, gera os valores aleatório para as hashes
 {
     hash_parameter = new int*[profundidade];
     for(int i=0; i<profundidade; i++)
@@ -129,10 +129,17 @@ void inicializa(int profundidade, int largura)
     newFilter(profundidade,largura,0);
 }
 
-void *update(void *threadupdate)
+void *update(void *threadupdate) //thread consumidora, chama suas workers e controla quando apagar dados do buffer
 {   
     update_t *args;
     args = (update_t *) threadupdate;
+    
+    atomic_int *buffer_current_size;
+    list <Buffertype> *buffer;
+    list<Buffertype>::iterator it;
+    
+    buffer_current_size=args->buffer_current_size;
+    buffer=args->buffer;
     
     pthread_t threads[NUMTHREADS];
     pthread_attr_t attr;
@@ -142,23 +149,41 @@ void *update(void *threadupdate)
     pthread_attr_init(&attr);
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE);
     
-    pthread_barrier_init(&barrier,NULL,NUMTHREADS);
-    
     for(int j=0; j<NUMTHREADS; j++)
     {   
         hashargs[j].pos=j;
-        hashargs[j].buffer=args->buffer;
+        hashargs[j].buffer=buffer;
         hashargs[j].index=args->index;
-        hashargs[j].buffer_current_size=args->buffer_current_size;
+        hashargs[j].buffer_current_size=buffer_current_size;
 
         pthread_create(&threads[j],&attr,hashParallel,(void *) &hashargs[j]);
     }
-
+    
+    //REGIÃO DE CONTROLE DO BUFFER. RETIRA A PRIMEIRA POS DO BUFFER CASO TODAS AS THREADS TENHAM A LIDO.
+    pthread_mutex_lock(&lock_buffer);
+    while(*buffer_current_size>-1){
+        pthread_mutex_unlock(&lock_buffer);
+        
+        pthread_mutex_lock(&lock_buffer);
+        if(*buffer_current_size==0)
+            continue;
+        
+        it=buffer->begin();
+        if(it->cnt == NUMTHREADS){
+            args->buffer->pop_front();
+            (*buffer_current_size)--;
+                
+            cout << "Tam buffer(update): " << *buffer_current_size << endl;
+            pthread_cond_signal(&can_produce);
+        }
+    }
+    pthread_mutex_unlock(&lock_buffer);
     for(int i=0; i<NUMTHREADS; i++)
     {
         pthread_join(threads[i],NULL);
     }
     cout << "PALAVRAS INSERIDAS" << endl;
+    pthread_exit(NULL);
 }
 
 int estimate(string palavra,int index)
@@ -192,7 +217,7 @@ void *hashParallel(void *threadhash)
     int pos,index;
 
     int a,b;
-    unsigned int *buffer_current_size;
+    atomic_int *buffer_current_size;
     
     hashParallel_t *args;
     args = (hashParallel_t *) threadhash;
@@ -208,13 +233,15 @@ void *hashParallel(void *threadhash)
     unsigned long hash;
     
     string palavra;
+    
+    pthread_mutex_lock(&lock_buffer);
     list<Buffertype>::iterator it=args->buffer->begin();
     
-    
-    while(it!=args->buffer->end()) {
+    while(!(*buffer_current_size<=-1 && it==args->buffer->end())) {
+        pthread_mutex_unlock(&lock_buffer);
         
+        //REALIZA O PROCESSO DE HASHING DA PALAVRA DBJ2 + A*palavra + B mod p mod n
         palavra=it->palavra;
-        
         strcpy(ch, palavra.c_str());
         
         hash = 5381;
@@ -226,42 +253,30 @@ void *hashParallel(void *threadhash)
 
         for(int i=0; i<sketches.CMS[index]->depth; i++)
         {
-
             a=hash_parameter[sketches.CMS[index]->depth*pos+i][0];
             b=hash_parameter[sketches.CMS[index]->depth*pos+i][1];
 
             saida = ((a*hash + b) % 2147483647) % (sketches.CMS[index]->width);
-            sketches.CMS[index]->filter[pos][i][saida]++; //atualiza
+            sketches.CMS[index]->filter[pos][i][saida]++; //atualiza o valor no sketch
         }
+        //FIM DO PROCESSO DE HASHING
         
-        pthread_mutex_lock(&lock_cnt); //lock somente para garatir integridade do valor
+        pthread_mutex_lock(&lock_buffer); //lock somente para garatir integridade do valor
             (it->cnt)++;
-        pthread_mutex_unlock(&lock_cnt);
-        
-        //sessão crítica
-        if(it->cnt == NUMTHREADS && it==args->buffer->begin()){ //ou seja, se todas as threads já leram essa pos do buffer
-            pthread_mutex_lock(&lock_buffer);
-                it++;
-                args->buffer->pop_front();
-                (*buffer_current_size)--;
-            pthread_mutex_unlock(&lock_buffer);
-            
-            //cout << "Tirei palavra: " << palavra << endl;
-            //cout << "Tam buffer: " << *buffer_current_size << endl;
-            
-            pthread_cond_signal(&can_produce);
-        }else{
             it++;
-        }
+        pthread_mutex_unlock(&lock_buffer);
         
-        pthread_barrier_wait(&barrier); //BARREIRA PARA UM THREAD NÃO ATINGIR O FIM DO BUFFER (limitado pela thread mais lenta)
-        
-        pthread_mutex_trylock(&mutex);
-        while (*buffer_current_size==0) { //se o buffer estiver vazio, espere PS.: fora da sessão crítica pois temos vários workers
+        pthread_mutex_lock(&mutex);
+        while (*buffer_current_size==0) { //se o buffer estiver vazio, espere
             pthread_cond_wait(&can_consume, &mutex);
-        }      
+        }
         pthread_mutex_unlock(&mutex);
+        
+        
+        pthread_mutex_lock(&lock_buffer);
     }
+    pthread_mutex_unlock(&lock_buffer);
+    cout << "WORKER DONE" << endl;
     pthread_exit(NULL);
 }
 
@@ -397,7 +412,7 @@ void *feedBuffer(void *threadbuffer){
     ifstream *file;
     list <Buffertype> *buffer;
     Buffertype temp;
-    unsigned int *buffer_current_size;
+    atomic_int *buffer_current_size;
     long unsigned int buffer_size;
 
     feedBuffer_t *args;
@@ -419,17 +434,26 @@ void *feedBuffer(void *threadbuffer){
             pthread_cond_wait(&can_produce, &mutex);
         }
         
-        pthread_mutex_lock(&lock_buffer);
-            *file >> temp.palavra;
+        *file >> temp.palavra;
+        
+        pthread_mutex_lock(&lock_buffer); //LENDO DE PALAVRA EM PALAVRA (descobrir tamanho ideal)
             buffer->push_back(temp);
             (*buffer_current_size)++;
+            cout << "Tam buffer(p): " << *buffer_current_size << endl;
         pthread_mutex_unlock(&lock_buffer);
+        
         
         pthread_cond_broadcast(&can_consume);
         pthread_mutex_unlock(&mutex);
+        
     }
     file->close();
-    *buffer_current_size = -1; //SINALIZAR QUE A LEITURA ACABOU, EIVTANDO O LOCK
+    
+    pthread_cond_broadcast(&can_consume);
+    
+    pthread_mutex_lock(&lock_buffer);
+        buffer_current_size->store(-1); //SINALIZAR QUE A LEITURA ACABOU, EIVTANDO O LOCK
+    pthread_mutex_unlock(&lock_buffer);
     cout << "FIM DA LEITURA" << endl;
     pthread_exit(NULL);
 }
